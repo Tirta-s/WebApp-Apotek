@@ -1,0 +1,6 @@
+{
+  "name": "PharmaPrecision ERP",
+  "description": "Multi-Branch Pharmacy ERP System with POS, Inventory, SIPNAP, and Auto-PO.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "PharmaPrecision ERP",
+  "short_name": "PharmaERP",
+  "description": "Enterprise Resource Planning for Pharmaceutical Operations",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#003554",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
