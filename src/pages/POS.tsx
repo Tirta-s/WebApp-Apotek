@@ -1,4 +1,5 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, Fragment, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
 import { BottomNavBar, SideNavBar, MobileHeader } from "../components/Navigation";
@@ -9,6 +10,18 @@ export default function POS() {
   const [cart, setCart] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [receiptToPrint, setReceiptToPrint] = useState<any>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (receiptToPrint) {
@@ -17,7 +30,7 @@ export default function POS() {
         if (element) {
           // Temporarily unhide to take snapshot
           element.classList.remove('hidden');
-          const opt = {
+          const opt: any = {
             margin:       5,
             filename:     `Receipt_${receiptToPrint.transactionId}.pdf`,
             image:        { type: 'jpeg', quality: 0.98 },
@@ -45,11 +58,29 @@ export default function POS() {
   });
 
   const [showSipnapForm, setShowSipnapForm] = useState(false);
-  const [patientData, setPatientData] = useState({ name: "", doctor: "", sip: "" });
+  const [transactionType, setTransactionType] = useState<"Resep" | "Non-Resep">("Non-Resep");
+  const [prescriptionData, setPrescriptionData] = useState({
+    prescriptionNumber: "",
+    patientNik: "",
+    patientName: "",
+    address: "",
+    prescribingDoctor: "",
+    doctorAddress: ""
+  });
+  const [patientData, setPatientData] = useState({ nik: "", name: "", doctor: "", sip: "" });
+  
+  const [patientsDB, setPatientsDB] = useState<any[]>([]);
+  const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
+  const [newPatientForm, setNewPatientForm] = useState({ nik: "", name: "", address: "" });
+
+  const [embalaseOptions, setEmbalaseOptions] = useState<any[]>([]);
+  const [selectedEmbalaseId, setSelectedEmbalaseId] = useState<string>("");
   
   const [isCompoundingOpen, setIsCompoundingOpen] = useState(false);
   const [isPrinterSettingsOpen, setIsPrinterSettingsOpen] = useState(false);
   const [isPreviewReceiptOpen, setIsPreviewReceiptOpen] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("Cash");
   const [printerStatus, setPrinterStatus] = useState("Connected");
   const [compoundingType, setCompoundingType] = useState("Kapsul");
   const [compoundingQty, setCompoundingQty] = useState<number>(1);
@@ -65,6 +96,17 @@ export default function POS() {
     fetch('/api/inventory')
       .then(res => res.json())
       .then(data => setInventory(data));
+
+    fetch('/api/embalase')
+      .then(res => res.json())
+      .then(data => {
+        setEmbalaseOptions(data);
+        if(data.length > 0) setSelectedEmbalaseId(data[0].id);
+      });
+
+    fetch('/api/patients')
+      .then(res => res.json())
+      .then(data => setPatientsDB(data));
   }, []);
 
   useEffect(() => {
@@ -166,38 +208,97 @@ export default function POS() {
   };
 
   const subtotal = cart.reduce((acc, item) => acc + (item.price * (Number(item.qty) || 0)), 0);
+  
+  const selectedEmbalaseObj = embalaseOptions.find(e => e.id === selectedEmbalaseId);
+  const embalasePrice = selectedEmbalaseObj ? selectedEmbalaseObj.price : 0;
+  const embalase = transactionType === "Resep" ? embalasePrice : 0;
+  
   const tax = subtotal * 0.11;
-  const total = subtotal + tax;
+  const total = subtotal + embalase + tax;
 
-  const checkout = async () => {
-    if (showSipnapForm && (!patientData.name || !patientData.doctor || !patientData.sip)) {
+  const checkout = async (paymentMethod: string) => {
+    if (transactionType === "Resep" && (!prescriptionData.patientName || !prescriptionData.prescribingDoctor || !patientData.sip)) {
+      alert("Please fill in Patient Name, Doctor Name, and SIP for Prescription items.");
+      return;
+    }
+    
+    // For SIPNAP via Non-Resep fallback
+    if (showSipnapForm && transactionType === "Non-Resep" && (!patientData.name || !patientData.doctor || !patientData.sip)) {
       alert("Please fill all regulatory fields for SIPNAP items.");
       return;
     }
     
     try {
+      // Save patient to DB if provided
+      const currentNik = transactionType === "Resep" ? prescriptionData.patientNik : (patientData as any).nik || "";
+      const currentName = transactionType === "Resep" ? prescriptionData.patientName : patientData.name;
+      const currentAddress = transactionType === "Resep" ? prescriptionData.address : "";
+      
+      if (currentNik && currentName) {
+        const existingInfo = patientsDB.find(p => p.nik === currentNik);
+        if (!existingInfo) {
+          await fetch('/api/patients', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nik: currentNik, name: currentName, address: currentAddress })
+          });
+          // optionally refresh local db
+          fetch('/api/patients').then(r => r.json()).then(setPatientsDB);
+        }
+      }
+
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: cart, ...patientData })
+        body: JSON.stringify({ 
+          items: cart, 
+          patient: transactionType === "Resep" ? prescriptionData.patientName : patientData.name,
+          doctor: transactionType === "Resep" ? prescriptionData.prescribingDoctor : patientData.doctor,
+          sip: patientData.sip,
+          doctorAddress: transactionType === "Resep" ? prescriptionData.doctorAddress : '',
+          paymentMethod 
+        })
       });
       const data = await res.json();
       if (data.success) {
-        alert("Transaction Successful! TR ID: " + data.transactionId);
-        
+        setIsPaymentModalOpen(false);
+        // We do not show alert anymore since we want direct download
         setReceiptToPrint({
           transactionId: data.transactionId,
           date: new Date().toLocaleString(),
           cart: [...cart],
           subtotal,
           tax,
-          total
+          total,
+          paymentMethod
         });
 
         setCart([]);
-        setPatientData({ name: "", doctor: "", sip: "" });
+        setPatientData({ nik: "", name: "", doctor: "", sip: "" });
+        setPrescriptionData({ prescriptionNumber: "", patientNik: "", patientName: "", address: "", prescribingDoctor: "", doctorAddress: "" });
+        // Reload inventory internally if possible, but the page handles state via refresh or we can just hope it's updated on next page load.
+        // POS isn't managing full inventory state, only a local search dropdown
+        fetch('/api/inventory').then(r => r.json()).then(setInventory);
       } else {
         alert(data.error || "Checkout failed");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleAddPatient = async () => {
+    try {
+      const res = await fetch('/api/patients', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newPatientForm)
+      });
+      if (res.ok) {
+        const added = await res.json();
+        setPatientsDB([...patientsDB, added]);
+        setNewPatientForm({ nik: "", name: "", address: "" });
+        setIsAddPatientModalOpen(false);
       }
     } catch (e) {
       console.error(e);
@@ -219,6 +320,7 @@ export default function POS() {
             <div className="relative flex-1">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-primary text-xl">barcode_scanner</span>
               <input 
+                ref={searchInputRef}
                 autoFocus 
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
@@ -230,10 +332,13 @@ export default function POS() {
                     }
                   }
                 }}
-                className="w-full pl-10 pr-36 h-12 bg-surface-container-lowest border-2 border-primary rounded font-body-lg text-body-lg text-on-surface focus:outline-none focus:ring-0 shadow-sm placeholder:text-on-surface-variant" 
+                className="w-full pl-10 pr-48 h-12 bg-surface-container-lowest border-2 border-primary rounded font-body-lg text-body-lg text-on-surface focus:outline-none focus:ring-0 shadow-sm placeholder:text-on-surface-variant" 
                 placeholder="Scan barcode or type item name..." 
                 type="text" 
               />
+              <div className="absolute right-36 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-on-surface-variant bg-surface-variant px-1 rounded font-data-mono hidden sm:block">
+                Ctrl K
+              </div>
               <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-[10px] font-bold text-primary bg-primary-container px-2 py-1 rounded border border-primary/20 pointer-events-none tracking-widest hidden sm:flex">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
@@ -299,7 +404,12 @@ export default function POS() {
                     <td colSpan={6} className="text-center py-12 text-on-surface-variant">Cart is empty. Scan an item or search above.</td>
                   </tr>
                 ) : cart.map((item, index) => (
-                  <tr key={index} className={`border-b border-border-subtle hover:bg-surface-container-low transition-colors group ${item.isSipnap ? 'bg-surface-muted border-l-4 border-l-regulatory-alert' : ''}`}>
+                  <motion.tr 
+                    key={`${item.id}-${index}`} 
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05, duration: 0.2 }}
+                    className={`border-b border-border-subtle hover:bg-surface-container-low transition-colors group ${item.isSipnap ? 'bg-surface-muted border-l-4 border-l-regulatory-alert' : ''}`}>
                     <td className="py-3 px-4 text-on-surface-variant">{index + 1}</td>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
@@ -366,7 +476,7 @@ export default function POS() {
                         </button>
                       </div>
                     </td>
-                  </tr>
+                  </motion.tr>
                 ))}
               </tbody>
             </table>
@@ -376,20 +486,128 @@ export default function POS() {
             <button className="whitespace-nowrap px-4 py-2 bg-surface-container-lowest border border-border-subtle rounded text-on-surface-variant font-body-md text-body-md hover:bg-surface-variant transition-colors flex items-center gap-1 text-sm">
               <span className="material-symbols-outlined text-[18px]">pause</span> Hold Bill
             </button>
-            <button className="whitespace-nowrap px-4 py-2 bg-surface-container-lowest border border-border-subtle rounded text-on-surface-variant font-body-md text-body-md hover:bg-surface-variant transition-colors flex items-center gap-1 text-sm">
+            <button onClick={() => setIsAddPatientModalOpen(true)} className="whitespace-nowrap px-4 py-2 bg-surface-container-lowest border border-border-subtle rounded text-on-surface-variant font-body-md text-body-md hover:bg-surface-variant transition-colors flex items-center gap-1 text-sm">
               <span className="material-symbols-outlined text-[18px]">person_add</span> Add Patient
             </button>
           </div>
         </section>
 
         <section className="w-full lg:w-96 flex flex-col gap-4 overflow-y-auto mb-16 md:mb-0 hidden md:flex">
-          {showSipnapForm && (
+          <div className="flex w-full shrink-0 shadow-sm border border-outline-variant rounded overflow-hidden">
+            <button 
+              onClick={() => setTransactionType("Resep")}
+              className={`flex-1 py-2 text-center text-sm font-bold ${transactionType === "Resep" ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"} transition-colors`}
+            >
+              Resep
+            </button>
+            <button 
+              onClick={() => setTransactionType("Non-Resep")}
+              className={`flex-1 py-2 text-center text-sm font-bold ${transactionType === "Non-Resep" ? "bg-primary text-on-primary" : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"} transition-colors`}
+            >
+              Non-Resep
+            </button>
+          </div>
+
+          {transactionType === "Resep" && (
+            <div className="bg-surface-container-lowest border border-outline-variant flex flex-col gap-3 shrink-0 shadow-sm backdrop-blur-sm pb-4">
+              <div className="flex items-center gap-2 p-3 border-b border-border-subtle shrink-0">
+                <span className="material-symbols-outlined text-primary text-[18px]">prescriptions</span>
+                <h3 className="font-headline-md text-xs font-bold text-on-surface-variant uppercase tracking-widest">Prescription Details</h3>
+              </div>
+              
+              <div className="px-4 flex flex-col gap-4">
+                <datalist id="patients-db">
+                  {patientsDB.map((p, idx) => (
+                    <option key={p.id || idx} value={p.nik}>{p.name} - {p.address}</option>
+                  ))}
+                </datalist>
+
+                <div className="relative mt-1">
+                  <label className="text-[10px] font-bold text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Prescription Number</label>
+                  <input value={prescriptionData.prescriptionNumber} onChange={e => setPrescriptionData({...prescriptionData, prescriptionNumber: e.target.value})} placeholder="e.g. RX-2026-0001" className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 focus:outline-none focus:border-primary text-sm font-data-mono h-10" type="text" />
+                </div>
+                
+                <div className="relative">
+                  <label className="text-[10px] font-bold text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Patient NIK</label>
+                  <input 
+                    list="patients-db"
+                    value={prescriptionData.patientNik} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      const matched = patientsDB.find(p => p.nik === val);
+                      if (matched) {
+                         setPrescriptionData({...prescriptionData, patientNik: matched.nik, patientName: matched.name, address: matched.address});
+                      } else {
+                         setPrescriptionData({...prescriptionData, patientNik: val});
+                      }
+                    }} 
+                    placeholder="16-digit NIK" 
+                    className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 focus:outline-none focus:border-primary text-sm font-data-mono h-10" 
+                    type="text" 
+                  />
+                </div>
+                
+                <div className="relative">
+                  <label className="text-[10px] font-bold text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Patient Name</label>
+                  <input value={prescriptionData.patientName} onChange={e => setPrescriptionData({...prescriptionData, patientName: e.target.value})} placeholder="Full Name" className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 focus:outline-none focus:border-primary text-sm h-10" type="text" />
+                </div>
+                
+                <div className="relative">
+                  <label className="text-[10px] font-bold text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Address</label>
+                  <input value={prescriptionData.address} onChange={e => setPrescriptionData({...prescriptionData, address: e.target.value})} placeholder="Patient Address" className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 focus:outline-none focus:border-primary text-sm h-10" type="text" />
+                </div>
+                
+                <div className="relative">
+                  <label className="text-[10px] font-bold text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Prescribing Doctor Info</label>
+                  <div className="flex flex-col gap-2 bg-surface-container-lowest border border-border-subtle rounded p-2 pt-3">
+                    <input value={prescriptionData.prescribingDoctor} onChange={e => setPrescriptionData({...prescriptionData, prescribingDoctor: e.target.value})} placeholder="Doctor Name" className="w-full bg-transparent focus:outline-none focus:border-b focus:border-primary text-sm h-8" type="text" />
+                    <input value={patientData.sip} onChange={e => setPatientData({...patientData, sip: e.target.value})} placeholder="Doctor SIP (License Number)" className="w-full bg-transparent focus:outline-none focus:border-b focus:border-primary text-sm h-8" type="text" />
+                    <input value={prescriptionData.doctorAddress} onChange={e => setPrescriptionData({...prescriptionData, doctorAddress: e.target.value})} placeholder="Doctor Address" className="w-full bg-transparent focus:outline-none focus:border-b focus:border-primary text-sm h-8" type="text" />
+                  </div>
+                </div>
+
+                <div className="relative">
+                   <label className="text-[10px] font-bold text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Embalase (Packaging) Fee</label>
+                   <select 
+                     value={selectedEmbalaseId} 
+                     onChange={e => setSelectedEmbalaseId(e.target.value)} 
+                     className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 focus:outline-none focus:border-primary text-sm h-10"
+                   >
+                      {embalaseOptions.map(opt => (
+                        <option key={opt.id} value={opt.id}>{opt.name} - Rp {opt.price.toLocaleString()}</option>
+                      ))}
+                   </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showSipnapForm && transactionType !== "Resep" && (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 flex flex-col gap-3 shrink-0 shadow-lg backdrop-blur-sm">
               <div className="flex items-center gap-2 mb-1">
                 <span className="material-symbols-outlined text-regulatory-alert text-xl" style={{fontVariationSettings: "'FILL' 1"}}>gavel</span>
                 <h3 className="font-headline-md text-body-lg font-bold text-on-surface">Regulatory Info</h3>
               </div>
               <div className="relative">
+                <label className="font-label-caps text-label-caps text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Patient NIK</label>
+                <input 
+                  list="patients-db"
+                  value={patientData.nik} 
+                  onChange={e => {
+                    const val = e.target.value;
+                    const matched = patientsDB.find(p => p.nik === val);
+                    if (matched) {
+                       setPatientData({...patientData, nik: matched.nik, name: matched.name});
+                    } else {
+                       setPatientData({...patientData, nik: val});
+                    }
+                  }} 
+                  className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 font-body-md text-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary h-10 font-data-mono" 
+                  type="text" 
+                  placeholder="16-digit NIK"
+                />
+              </div>
+              <div className="relative mt-2">
                 <label className="font-label-caps text-label-caps text-on-surface-variant absolute -top-2 left-2 bg-surface-container-lowest px-1">Patient Name <span className="text-regulatory-alert">*</span></label>
                 <input value={patientData.name} onChange={e => setPatientData({...patientData, name: e.target.value})} className="w-full bg-surface-container-lowest border border-border-subtle rounded p-2 font-body-md text-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary h-10" type="text" />
               </div>
@@ -404,38 +622,35 @@ export default function POS() {
             </div>
           )}
 
-          <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 mt-auto shadow-lg backdrop-blur-sm shrink-0">
-            <div className="flex justify-between items-center mb-2 font-body-md text-body-md text-on-surface-variant">
+          <div className="bg-surface-container-lowest border border-outline-variant p-6 mt-auto shadow-sm backdrop-blur-sm shrink-0">
+            <div className="flex justify-between items-center mb-2 text-sm text-on-surface-variant">
               <span>Subtotal</span>
-              <span className="font-data-mono text-data-mono">Rp {subtotal.toLocaleString()}</span>
+              <span className="font-data-mono font-bold">Rp {subtotal.toLocaleString()}</span>
             </div>
-            <div className="flex justify-between items-center mb-2 font-body-md text-body-md text-on-surface-variant">
-              <span>Tax (11%)</span>
-              <span className="font-data-mono text-data-mono">Rp {tax.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between items-center mb-4 font-body-md text-body-md text-on-surface-variant">
-              <span>Discount</span>
-              <div className="flex items-center gap-2">
-                {isManager && (
-                  <button className="text-[10px] bg-surface-container-high px-2 py-0.5 rounded font-label-caps font-bold hover:bg-surface-variant">Apply</button>
-                )}
-                <span className="font-data-mono text-data-mono text-tertiary">- Rp 0</span>
+            {transactionType === "Resep" && (
+              <div className="flex justify-between items-center mb-2 text-sm text-on-surface-variant">
+                <span>Embalase (Packaging)</span>
+                <span className="font-data-mono font-bold">Rp {embalase.toLocaleString()}</span>
               </div>
+            )}
+            <div className="flex justify-between items-center mb-4 text-sm text-on-surface-variant">
+              <span>Tax (11%)</span>
+              <span className="font-data-mono font-bold">Rp {tax.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
             </div>
             <div className="border-t border-border-subtle pt-4 mb-6">
               <div className="flex justify-between items-end">
-                <span className="font-headline-md text-headline-md text-on-surface font-bold">Total</span>
-                <span className="font-pos-total text-pos-total text-primary font-bold text-3xl">Rp {total.toLocaleString()}</span>
+                <span className="font-headline-md text-on-surface font-bold">Total</span>
+                <span className="font-pos-total text-primary font-bold text-2xl">Rp {total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
               </div>
             </div>
             <div className="flex flex-col gap-3">
-              <button disabled={cart.length === 0} onClick={() => setIsPreviewReceiptOpen(true)} className="disabled:opacity-50 w-full bg-surface-container-high hover:bg-surface-variant border border-outline-variant text-on-surface rounded-xl h-12 font-headline-md font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
-                <span className="material-symbols-outlined text-[20px]">receipt_long</span>
+              <button disabled={cart.length === 0} onClick={() => setIsPreviewReceiptOpen(true)} className="disabled:opacity-50 w-full bg-surface-container-high hover:bg-surface-variant border border-outline-variant text-on-surface rounded font-bold flex items-center justify-center gap-2 transition-all shadow-sm py-2">
+                <span className="material-symbols-outlined text-[18px]">receipt_long</span>
                 Preview Receipt
               </button>
-              <button disabled={cart.length === 0} onClick={checkout} className="disabled:opacity-50 w-full bg-primary hover:bg-surface-tint text-on-primary rounded-xl h-20 font-headline-lg text-headline-lg font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-sm">
-                <span className="material-symbols-outlined text-[32px]">payments</span>
-                PAY NOW
+              <button disabled={cart.length === 0} onClick={() => setIsPaymentModalOpen(true)} className="disabled:opacity-50 w-full bg-primary hover:opacity-90 text-on-primary rounded font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-sm py-3 text-base">
+                <span className="material-symbols-outlined text-[20px]">payments</span>
+                PROCESS PAYMENT [F12]
               </button>
             </div>
           </div>
@@ -685,6 +900,96 @@ export default function POS() {
         </div>
       )}
 
+      {/* Add Patient Modal */}
+      {isAddPatientModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-xl flex flex-col border border-outline-variant">
+            <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-muted rounded-t-2xl">
+              <h2 className="font-headline-md font-bold text-on-surface">Add New Patient</h2>
+              <button onClick={() => setIsAddPatientModalOpen(false)} className="p-2 hover:bg-surface-variant rounded-full transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Patient NIK</label>
+                <input type="text" value={newPatientForm.nik} onChange={e => setNewPatientForm({...newPatientForm, nik: e.target.value})} className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" placeholder="16-digit NIK" />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Patient Name</label>
+                <input type="text" value={newPatientForm.name} onChange={e => setNewPatientForm({...newPatientForm, name: e.target.value})} className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" placeholder="Full Name" />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Address</label>
+                <textarea value={newPatientForm.address} onChange={e => setNewPatientForm({...newPatientForm, address: e.target.value})} className="w-full p-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" rows={3} placeholder="Full Address"></textarea>
+              </div>
+            </div>
+            <div className="p-6 border-t border-outline-variant flex justify-end gap-3 bg-surface-muted rounded-b-2xl mt-auto">
+               <button onClick={() => setIsAddPatientModalOpen(false)} className="px-4 py-2 border border-outline-variant text-on-surface rounded font-bold text-sm hover:bg-surface-variant transition-colors">Cancel</button>
+               <button onClick={handleAddPatient} disabled={!newPatientForm.name || !newPatientForm.nik} className="px-6 py-2 bg-primary disabled:opacity-50 text-on-primary rounded font-bold text-sm tracking-widest hover:bg-primary-fixed transition-colors">Save Patient</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENT MODAL */}
+      {isPaymentModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-md rounded-2xl shadow-xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-muted rounded-t-2xl shrink-0">
+              <h2 className="font-headline-md font-bold text-on-surface flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">payments</span>
+                Select Payment Method
+              </h2>
+              <button onClick={() => setIsPaymentModalOpen(false)} className="p-2 hover:bg-surface-variant rounded-full transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 font-body-md">
+              <div className="text-center mb-4">
+                <div className="text-sm text-on-surface-variant uppercase font-bold tracking-wider mb-2">Total Payment</div>
+                <div className="text-4xl font-pos-total text-primary font-bold">Rp {total.toLocaleString()}</div>
+              </div>
+              
+              <div className="grid grid-cols-1 gap-3">
+                {['Cash', 'Card / Debit', 'QR Code / E-Wallet'].map((method) => (
+                  <button 
+                    key={method}
+                    onClick={() => setSelectedPaymentMethod(method)}
+                    className={`p-4 border-2 rounded-xl flex items-center justify-between transition-colors ${selectedPaymentMethod === method ? 'border-primary bg-primary-container text-on-primary-container' : 'border-outline-variant hover:bg-surface-muted text-on-surface'}`}
+                  >
+                     <div className="flex items-center gap-3 font-bold text-lg">
+                       <span className="material-symbols-outlined">
+                         {method === 'Cash' ? 'payments' : method === 'Card / Debit' ? 'credit_card' : 'qr_code_scanner'}
+                       </span>
+                       {method}
+                     </div>
+                     {selectedPaymentMethod === method && <span className="material-symbols-outlined text-primary">check_circle</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-outline-variant bg-surface-muted flex gap-3 rounded-b-2xl shrink-0">
+              <button 
+                onClick={() => setIsPaymentModalOpen(false)} 
+                className="flex-1 py-4 text-on-surface-variant font-bold border border-outline-variant rounded-xl hover:bg-surface-variant transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => checkout(selectedPaymentMethod)} 
+                className="flex-[2] py-4 bg-primary text-on-primary font-bold rounded-xl hover:bg-surface-tint shadow-sm transition-transform active:scale-95 flex items-center justify-center gap-2 text-lg"
+              >
+                <span className="material-symbols-outlined">done_all</span>
+                CONFIRM PAYMENT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* PREVIEW RECEIPT MODAL */}
       {isPreviewReceiptOpen && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
@@ -760,7 +1065,7 @@ export default function POS() {
               <button 
                 onClick={() => {
                   setIsPreviewReceiptOpen(false);
-                  checkout();
+                  setIsPaymentModalOpen(true);
                 }} 
                 className="flex-[2] py-3 bg-primary text-on-primary font-bold rounded-lg hover:bg-surface-tint shadow-sm transition-transform active:scale-95 flex items-center justify-center gap-2"
               >

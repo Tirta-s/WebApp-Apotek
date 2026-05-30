@@ -2,33 +2,36 @@ import { useState, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function Login() {
-  const [role, setRole] = useState("Staff");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
-  const accounts = {
-    "Manager": { username: "manager", password: "password123" },
-    "Pengelola Apotek": { username: "pengelola", password: "password123" },
-    "Staff": { username: "staff", password: "password123" },
-  };
-
-  const handleRoleChange = (newRole: keyof typeof accounts) => {
-    setRole(newRole);
-    setUsername("");
-    setPassword("");
-    setError("");
-  };
-
-  const handleLogin = (e: FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
-    const account = accounts[role as keyof typeof accounts];
-    if (username === account.username && password === account.password) {
-      localStorage.setItem("userRole", role);
-      navigate("/pos");
-    } else {
-      setError("Username atau password yang dimasukkan salah.");
+    try {
+      if (!username || !password) {
+        setError("Silakan masukkan username dan password.");
+        return;
+      }
+      
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        localStorage.setItem("userRole", data.user.role);
+        localStorage.setItem("userName", data.user.name);
+        navigate("/pos");
+      } else {
+        setError(data.error || "Username atau password yang dimasukkan salah.");
+      }
+    } catch (err) {
+      setError("Terjadi kesalahan koneksi. Silakan coba lagi.");
     }
   };
 
@@ -59,30 +62,6 @@ export default function Login() {
                 </div>
               )}
               
-              <div>
-                <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-1.5" htmlFor="role">
-                  Akses Sebagai
-                </label>
-                <div className="relative">
-                  <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">
-                    admin_panel_settings
-                  </span>
-                  <select
-                    id="role"
-                    value={role}
-                    onChange={(e) => handleRoleChange(e.target.value as keyof typeof accounts)}
-                    className="w-full pl-10 pr-4 h-12 bg-surface-muted border border-outline-variant rounded-xl text-sm font-medium text-inverse-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
-                  >
-                    <option value="Manager">Manager</option>
-                    <option value="Pengelola Apotek">Pengelola Apotek</option>
-                    <option value="Staff">Staff</option>
-                  </select>
-                  <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none">
-                    expand_more
-                  </span>
-                </div>
-              </div>
-
               <div>
                 <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-1.5" htmlFor="username">
                   Username / ID
@@ -134,12 +113,6 @@ export default function Login() {
           </form>
         </div>
 
-        <div className="px-8 py-4 bg-surface-container-low border-t border-outline-variant flex flex-col items-center gap-1 text-[11px] font-mono text-on-surface-variant">
-          <span className="font-bold text-on-surface">Demo Accounts:</span>
-          <span>Manager: manager / password123</span>
-          <span>Pengelola: pengelola / password123</span>
-          <span>Staff: staff / password123</span>
-        </div>
         <div className="px-8 py-4 bg-surface-muted border-t border-outline-variant text-center">
           <p className="text-[10px] text-on-surface-variant font-mono">
             PharmaPrecision ERP v2.4.1 - Encrypted PWA Tunnel

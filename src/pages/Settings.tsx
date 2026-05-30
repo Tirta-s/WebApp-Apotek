@@ -7,8 +7,38 @@ export default function Settings() {
   const userBranch = localStorage.getItem("userBranch") || "Utama - Jakarta Selatan";
   const isManager = userRole === "Manager";
   const isPengelola = userRole === "Pengelola Apotek";
+  const userName = localStorage.getItem("userName") || userRole;
+  
+  const getHeaders = () => ({
+    "Content-Type": "application/json",
+    "x-actor": userName
+  });
 
   const [activeTab, setActiveTab] = useState("accounts");
+  
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+
+  const [targetSettings, setTargetSettings] = useState({
+    shift: 0,
+    day: 0,
+    month: 0,
+    quarter: 0,
+    year: 0
+  });
+  const [isSavingTargets, setIsSavingTargets] = useState(false);
+
+  const [patientList, setPatientList] = useState<any[]>([]);
+  const [isAddPatientModalOpen, setIsAddPatientModalOpen] = useState(false);
+  const [newPatientForm, setNewPatientForm] = useState({ nik: "", name: "", address: "" });
+  const [isEditPatientModalOpen, setIsEditPatientModalOpen] = useState(false);
+  const [editPatientForm, setEditPatientForm] = useState({ id: "", nik: "", name: "", address: "" });
+  const [isDeletePatientModalOpen, setIsDeletePatientModalOpen] = useState(false);
+  const [deletePatientId, setDeletePatientId] = useState<string | null>(null);
+
+  const [embalaseList, setEmbalaseList] = useState<any[]>([]);
+  const [isAddEmbalaseModalOpen, setIsAddEmbalaseModalOpen] = useState(false);
+  const [newEmbalaseForm, setNewEmbalaseForm] = useState({ name: "", price: 0 });
+  
   const [isAddPbfModalOpen, setIsAddPbfModalOpen] = useState(false);
   const [isEditPbfModalOpen, setIsEditPbfModalOpen] = useState(false);
   const [pbfList, setPbfList] = useState<any[]>([]);
@@ -33,15 +63,31 @@ export default function Settings() {
 
   const [accountList, setAccountList] = useState<any[]>([]);
   const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
-  const [newAccountForm, setNewAccountForm] = useState({ name: "", role: "Staff" });
+  const [newAccountForm, setNewAccountForm] = useState({ name: "", role: "Staff", username: "", password: "" });
   const [isEditAccountModalOpen, setIsEditAccountModalOpen] = useState(false);
-  const [editAccountForm, setEditAccountForm] = useState({ id: "", name: "", role: "Staff" });
+  const [editAccountForm, setEditAccountForm] = useState({ id: "", name: "", role: "Staff", username: "", password: "" });
   const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState(false);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
 
   const [searchDrug, setSearchDrug] = useState("");
 
   useEffect(() => {
+    fetch('/api/audit-logs')
+      .then(res => res.json())
+      .then(data => setAuditLogs(data));
+
+    fetch('/api/targets')
+      .then(res => res.json())
+      .then(data => setTargetSettings(data));
+
+    fetch('/api/embalase')
+      .then(res => res.json())
+      .then(data => setEmbalaseList(data));
+
+    fetch('/api/patients')
+      .then(res => res.json())
+      .then(data => setPatientList(data));
+
     fetch('/api/pbf')
       .then(res => res.json())
       .then(data => setPbfList(data));
@@ -59,6 +105,27 @@ export default function Settings() {
       .then(data => setAccountList(data));
   }, []);
 
+  const handleSaveTargets = async () => {
+    setIsSavingTargets(true);
+    try {
+      const res = await fetch('/api/targets', {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(targetSettings)
+      });
+      if (res.ok) {
+        alert("Target settings saved successfully.");
+      } else {
+        alert("Failed to save target settings.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("An error occurred while saving target settings.");
+    } finally {
+      setIsSavingTargets(false);
+    }
+  };
+
   const handleAddConv = async () => {
     try {
       let generatedRule = `1 ${newConvForm.besar || '...'} = ${newConvForm.sedang_qty || 0} ${newConvForm.sedang || '...'}`;
@@ -69,7 +136,7 @@ export default function Settings() {
 
       const res = await fetch('/api/conversions', {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify(payload)
       });
       if (res.ok) {
@@ -94,7 +161,7 @@ export default function Settings() {
 
       const res = await fetch(`/api/conversions/${editConvForm.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders(),
         body: JSON.stringify(payload)
       });
       if (res.ok) {
@@ -110,7 +177,7 @@ export default function Settings() {
   const handleDeleteConv = async () => {
     if (!deleteConvId) return;
     try {
-      const res = await fetch(`/api/conversions/${deleteConvId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/conversions/${deleteConvId}`, { method: 'DELETE', headers: { 'x-actor': userName } });
       if (res.ok) {
         setConversionList(conversionList.filter(c => c.id !== deleteConvId));
         setIsDeleteConvModalOpen(false);
@@ -121,17 +188,66 @@ export default function Settings() {
     }
   };
 
+  const handleAddPatient = async () => {
+    try {
+      const res = await fetch('/api/patients', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newPatientForm)
+      });
+      if (res.ok) {
+        const added = await res.json();
+        setPatientList([...patientList, added]);
+        setNewPatientForm({ nik: "", name: "", address: "" });
+        setIsAddPatientModalOpen(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleEditPatient = async () => {
+    if (!editPatientForm.id) return;
+    try {
+      const res = await fetch(`/api/patients/${editPatientForm.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editPatientForm)
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setPatientList(patientList.map(p => p.id === updated.id ? updated : p));
+        setIsEditPatientModalOpen(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeletePatient = async () => {
+    if (!deletePatientId) return;
+    try {
+      const res = await fetch(`/api/patients/${deletePatientId}`, { method: "DELETE" });
+      if (res.ok) {
+        setPatientList(patientList.filter(p => p.id !== deletePatientId));
+        setIsDeletePatientModalOpen(false);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleAddAccount = async () => {
     try {
       const res = await fetch('/api/accounts', {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(),
         body: JSON.stringify(newAccountForm)
       });
       if (res.ok) {
         const added = await res.json();
         setAccountList([...accountList, added]);
-        setNewAccountForm({ name: "", role: "Staff" });
+        setNewAccountForm({ name: "", role: "Staff", username: "", password: "" });
         setIsAddAccountModalOpen(false);
       }
     } catch (e) {
@@ -144,8 +260,13 @@ export default function Settings() {
     try {
       const res = await fetch(`/api/accounts/${editAccountForm.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editAccountForm.name, role: editAccountForm.role })
+        headers: getHeaders(),
+        body: JSON.stringify({ 
+          name: editAccountForm.name, 
+          role: editAccountForm.role,
+          username: editAccountForm.username,
+          password: editAccountForm.password 
+        })
       });
       if (res.ok) {
         const updated = await res.json();
@@ -160,7 +281,7 @@ export default function Settings() {
   const handleDeleteAccount = async () => {
     if (!deleteAccountId) return;
     try {
-      const res = await fetch(`/api/accounts/${deleteAccountId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/accounts/${deleteAccountId}`, { method: 'DELETE', headers: { 'x-actor': userName } });
       if (res.ok) {
         setAccountList(accountList.filter(a => a.id !== deleteAccountId));
         setIsDeleteAccountModalOpen(false);
@@ -303,6 +424,22 @@ export default function Settings() {
                 <span className="material-symbols-outlined text-[20px]">manage_accounts</span>
                 Account Mgt
               </button>
+              {isManager && (
+                <button 
+                  onClick={() => setActiveTab("targets")}
+                  className={`whitespace-nowrap flex items-center gap-2 px-4 py-3 rounded-lg text-left transition-colors font-medium text-sm ${activeTab === "targets" ? "bg-primary-container text-primary border border-primary/20" : "text-on-surface-variant hover:bg-surface-container"}`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">ads_click</span>
+                  Targets
+                </button>
+              )}
+              <button 
+                onClick={() => setActiveTab("patients")}
+                className={`whitespace-nowrap flex items-center gap-2 px-4 py-3 rounded-lg text-left transition-colors font-medium text-sm ${activeTab === "patients" ? "bg-primary-container text-primary border border-primary/20" : "text-on-surface-variant hover:bg-surface-container"}`}
+              >
+                <span className="material-symbols-outlined text-[20px]">recent_patient</span>
+                Patient DB
+              </button>
               <button 
                 onClick={() => setActiveTab("drugs")}
                 className={`whitespace-nowrap flex items-center gap-2 px-4 py-3 rounded-lg text-left transition-colors font-medium text-sm ${activeTab === "drugs" ? "bg-primary-container text-primary border border-primary/20" : "text-on-surface-variant hover:bg-surface-container"}`}
@@ -317,11 +454,74 @@ export default function Settings() {
                 <span className="material-symbols-outlined text-[20px]">local_shipping</span>
                 PBF / Vendors
               </button>
+              <button 
+                onClick={() => setActiveTab("embalase")}
+                className={`whitespace-nowrap flex items-center gap-2 px-4 py-3 rounded-lg text-left transition-colors font-medium text-sm ${activeTab === "embalase" ? "bg-primary-container text-primary border border-primary/20" : "text-on-surface-variant hover:bg-surface-container"}`}
+              >
+                <span className="material-symbols-outlined text-[20px]">inventory_2</span>
+                Embalase / Packaging
+              </button>
+              {isManager && (
+                <button 
+                  onClick={() => setActiveTab("audit")}
+                  className={`whitespace-nowrap flex items-center gap-2 px-4 py-3 rounded-lg text-left transition-colors font-medium text-sm ${activeTab === "audit" ? "bg-primary-container text-primary border border-primary/20" : "text-on-surface-variant hover:bg-surface-container"}`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">history</span>
+                  Audit Trail
+                </button>
+              )}
             </div>
 
             {/* Content Area */}
             <div className="flex-1 p-6 overflow-y-auto">
               
+              {activeTab === "patients" && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center pb-4 border-b border-outline-variant">
+                    <div>
+                      <h2 className="text-xl font-bold text-on-surface">Patient Database</h2>
+                      <p className="text-sm text-on-surface-variant opacity-80 mt-1">
+                        Manage patient data from POS and Prescriptions.
+                      </p>
+                    </div>
+                    <button onClick={() => setIsAddPatientModalOpen(true)} className="px-4 py-2 bg-primary text-on-primary rounded font-bold text-sm tracking-widest flex items-center gap-2 hover:bg-primary-fixed transition-colors">
+                      <span className="material-symbols-outlined text-[18px]">person_add</span>
+                      Add Patient
+                    </button>
+                  </div>
+                  
+                  <div className="bg-surface-container-low border border-outline-variant rounded-lg overflow-hidden">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead className="bg-surface-muted text-on-surface-variant font-bold border-b border-outline-variant uppercase text-xs tracking-wider">
+                        <tr>
+                          <th className="p-4">NIK</th>
+                          <th className="p-4">Patient Name</th>
+                          <th className="p-4">Address</th>
+                          <th className="p-4 text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-outline-variant">
+                        {patientList.map((patient: any, idx: number) => (
+                          <tr key={patient.id || idx} className="hover:bg-surface-muted transition-colors">
+                            <td className="p-4 font-medium text-primary font-data-mono">{patient.nik}</td>
+                            <td className="p-4 text-on-surface">{patient.name}</td>
+                            <td className="p-4 text-on-surface-variant max-w-xs truncate">{patient.address}</td>
+                            <td className="p-4 text-center">
+                              <button onClick={() => { setEditPatientForm({ id: patient.id, nik: patient.nik, name: patient.name, address: patient.address }); setIsEditPatientModalOpen(true); }} className="p-1.5 hover:bg-surface-variant text-primary rounded mr-2" title="Edit">
+                                <span className="material-symbols-outlined text-[16px]">edit</span>
+                              </button>
+                              <button onClick={() => { setDeletePatientId(patient.id); setIsDeletePatientModalOpen(true); }} className="p-1.5 hover:bg-error-container text-regulatory-alert rounded" title="Delete">
+                                <span className="material-symbols-outlined text-[16px]">delete</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {activeTab === "accounts" && (
                 <div className="space-y-6">
                   <div className="flex justify-between items-center pb-4 border-b border-outline-variant">
@@ -351,11 +551,11 @@ export default function Settings() {
                           <tr key={acc.id} className="hover:bg-surface-muted transition-colors">
                             <td className="p-4">
                               <div className="font-bold text-on-surface">{acc.name}</div>
-                              <div className="text-xs text-on-surface-variant font-mono">ID: {acc.id}</div>
+                              <div className="text-xs text-on-surface-variant font-mono">ID: {acc.id} • Username: {acc.username}</div>
                             </td>
                             <td className="p-4"><span className="px-2 py-1 bg-secondary-container text-on-surface font-bold text-[10px] uppercase rounded border border-outline-variant text-[10px]">{acc.role}</span></td>
                             <td className="p-4 text-center">
-                              <button onClick={() => { setEditAccountForm({ id: acc.id, name: acc.name, role: acc.role }); setIsEditAccountModalOpen(true); }} className="p-1.5 hover:bg-surface-variant text-primary rounded transition-colors mx-1" title="Edit">
+                              <button onClick={() => { setEditAccountForm({ id: acc.id, name: acc.name, role: acc.role, username: acc.username || "", password: "" }); setIsEditAccountModalOpen(true); }} className="p-1.5 hover:bg-surface-variant text-primary rounded transition-colors mx-1" title="Edit">
                                 <span className="material-symbols-outlined text-[18px]">edit</span>
                               </button>
                               <button onClick={() => { setDeleteAccountId(acc.id); setIsDeleteAccountModalOpen(true); }} className="p-1.5 hover:bg-error-container text-regulatory-alert rounded transition-colors mx-1" title="Delete">
@@ -366,6 +566,70 @@ export default function Settings() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "targets" && isManager && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center pb-4 border-b border-outline-variant">
+                    <div>
+                      <h2 className="text-xl font-bold text-on-surface">Target Settings</h2>
+                      <p className="text-sm text-on-surface-variant opacity-80 mt-1">
+                        Set revenue targets for different periods to display in analytics.
+                      </p>
+                    </div>
+                    <button onClick={handleSaveTargets} disabled={isSavingTargets} className="px-4 py-2 bg-primary text-on-primary rounded font-bold text-sm tracking-widest flex items-center gap-2 hover:bg-primary-fixed transition-colors disabled:opacity-50">
+                      <span className="material-symbols-outlined text-[18px]">save</span>
+                      {isSavingTargets ? "Saving..." : "Save Targets"}
+                    </button>
+                  </div>
+                  <div className="max-w-xl space-y-4">
+                    <div>
+                      <label className="block font-bold text-on-surface mb-2">Target Shift</label>
+                      <input 
+                        type="number" 
+                        value={targetSettings.shift}
+                        onChange={e => setTargetSettings({...targetSettings, shift: Number(e.target.value)})}
+                        className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-on-surface mb-2">Target 1 Hari</label>
+                      <input 
+                        type="number" 
+                        value={targetSettings.day}
+                        onChange={e => setTargetSettings({...targetSettings, day: Number(e.target.value)})}
+                        className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-on-surface mb-2">Target 1 Bulan</label>
+                      <input 
+                        type="number" 
+                        value={targetSettings.month}
+                        onChange={e => setTargetSettings({...targetSettings, month: Number(e.target.value)})}
+                        className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-on-surface mb-2">Target 3 Bulan</label>
+                      <input 
+                        type="number" 
+                        value={targetSettings.quarter}
+                        onChange={e => setTargetSettings({...targetSettings, quarter: Number(e.target.value)})}
+                        className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-on-surface mb-2">Target Tahun</label>
+                      <input 
+                        type="number" 
+                        value={targetSettings.year}
+                        onChange={e => setTargetSettings({...targetSettings, year: Number(e.target.value)})}
+                        className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -391,7 +655,7 @@ export default function Settings() {
                           <span className="font-bold text-primary w-20">{conv.name}</span>
                           <span className="text-on-surface text-sm">{conv.rule}</span>
                           <div className="ml-auto flex gap-2">
-                            <button onClick={() => { setEditConvForm({ id: conv.id, name: conv.name, rule: conv.rule, besar: conv.besar, sedang: conv.sedang, sedang_qty: conv.sedang_qty, kecil: conv.kecil, kecil_qty: conv.kecil_qty }); setIsEditConvModalOpen(true); }} className="p-1.5 hover:bg-surface-variant text-primary rounded"><span className="material-symbols-outlined text-[16px]">edit</span></button>
+                            <button onClick={() => { setEditConvForm({ id: conv.id, name: conv.name, besar: conv.besar || "", sedang: conv.sedang || "", sedang_qty: conv.sedang_qty || "", kecil: conv.kecil || "", kecil_qty: conv.kecil_qty || "" }); setIsEditConvModalOpen(true); }} className="p-1.5 hover:bg-surface-variant text-primary rounded"><span className="material-symbols-outlined text-[16px]">edit</span></button>
                             <button onClick={() => { setDeleteConvId(conv.id); setIsDeleteConvModalOpen(true); }} className="p-1.5 hover:bg-error-container text-regulatory-alert rounded"><span className="material-symbols-outlined text-[16px]">delete</span></button>
                           </div>
                         </div>
@@ -474,10 +738,142 @@ export default function Settings() {
                 </div>
               )}
 
+              {activeTab === "audit" && isManager && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center pb-4 border-b border-outline-variant">
+                    <div>
+                      <h2 className="text-xl font-bold text-on-surface">Audit Trail</h2>
+                      <p className="text-sm text-on-surface-variant opacity-80 mt-1">
+                        Aktivitas log mendetail tentang perubahan krusial di sistem.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-outline-variant bg-surface">
+                    <table className="w-full text-left border-collapse font-body-md text-sm">
+                      <thead>
+                        <tr className="bg-surface-muted text-on-surface-variant border-b border-outline-variant/60 uppercase tracking-wider text-xs">
+                          <th className="p-4 font-bold w-48">Waktu</th>
+                          <th className="p-4 font-bold w-48">Aktor</th>
+                          <th className="p-4 font-bold w-48">Tindakan</th>
+                          <th className="p-4 font-bold leading-relaxed">Rincian</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-outline-variant/60">
+                        {auditLogs.length > 0 ? (
+                           auditLogs.map((log: any) => (
+                             <tr key={log.id} className="hover:bg-surface-muted/50 transition-colors">
+                               <td className="p-4 font-mono font-medium text-xs text-on-surface-variant">
+                                 {new Date(log.timestamp).toLocaleString('id-ID', {day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'})}
+                               </td>
+                               <td className="p-4 font-bold text-primary">{log.actor}</td>
+                               <td className="p-4 font-data-mono">{log.action}</td>
+                               <td className="p-4 text-on-surface">{log.detail}</td>
+                             </tr>
+                           ))
+                        ) : (
+                          <tr>
+                            <td colSpan={4} className="p-8 text-center text-on-surface-variant">
+                              Tidak ada history audit log.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "embalase" && (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center pb-4 border-b border-outline-variant">
+                    <div>
+                      <h2 className="text-xl font-bold text-on-surface">Embalase / Kemasan Settings</h2>
+                      <p className="text-sm text-on-surface-variant opacity-80 mt-1">Manage packaging options (Embalase) and their prices for prescriptions.</p>
+                    </div>
+                    <button onClick={() => setIsAddEmbalaseModalOpen(true)} className="px-4 py-2 bg-primary text-on-primary rounded font-bold text-sm tracking-widest flex items-center gap-2 hover:bg-primary-fixed transition-colors">
+                      <span className="material-symbols-outlined text-[18px]">add</span>
+                      Add Embalase
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {embalaseList.map((emb, idx) => (
+                      <div key={emb.id || idx} className="bg-surface-container-low border border-outline-variant p-4 rounded-lg flex justify-between items-center hover:border-primary/50 transition-colors">
+                        <div>
+                           <h4 className="font-bold text-on-surface mb-1">{emb.name}</h4>
+                           <p className="text-sm text-primary font-data-mono font-bold">Rp {emb.price.toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
           </div>
         </div>
       </main>
+
+      {/* Add Embalase Modal */}
+      {isAddEmbalaseModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-xl flex flex-col border border-outline-variant">
+            <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-muted rounded-t-2xl">
+              <h2 className="font-headline-md font-bold text-on-surface">Tambah Embalase Baru</h2>
+              <button onClick={() => setIsAddEmbalaseModalOpen(false)} className="p-2 hover:bg-surface-variant rounded-full transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1">Nama Kemasan / Embalase</label>
+                <input 
+                  type="text" 
+                  value={newEmbalaseForm.name} 
+                  onChange={e => setNewEmbalaseForm({...newEmbalaseForm, name: e.target.value})}
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded p-2 focus:outline-none focus:border-primary" 
+                  placeholder="e.g. Kertas Puyer" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-1">Harga (Rp)</label>
+                <input 
+                  type="number" 
+                  value={newEmbalaseForm.price} 
+                  onChange={e => setNewEmbalaseForm({...newEmbalaseForm, price: Number(e.target.value)})}
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded p-2 focus:outline-none focus:border-primary" 
+                  placeholder="e.g. 2000" 
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t border-outline-variant bg-surface-muted rounded-b-2xl flex justify-end gap-3">
+              <button onClick={() => setIsAddEmbalaseModalOpen(false)} className="px-5 py-2 font-bold text-on-surface-variant hover:bg-surface-variant rounded transition-colors">Batal</button>
+              <button 
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/embalase', {
+                      method: 'POST',
+                      headers: getHeaders(),
+                      body: JSON.stringify(newEmbalaseForm)
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setEmbalaseList([...embalaseList, data]);
+                      setNewEmbalaseForm({ name: "", price: 0 });
+                      setIsAddEmbalaseModalOpen(false);
+                    }
+                  } catch(e) {
+                     console.error("Gagal tambah embalase");
+                  }
+                }} 
+                className="px-5 py-2 bg-primary text-on-primary font-bold rounded hover:bg-primary-fixed transition-colors"
+               >
+                 Simpan
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add PBF Modal */}
       {isAddPbfModalOpen && (
@@ -827,6 +1223,90 @@ export default function Settings() {
         </div>
       )}
 
+      {/* Add Patient Modal */}
+      {isAddPatientModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-xl flex flex-col border border-outline-variant">
+            <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-muted rounded-t-2xl">
+              <h2 className="font-headline-md font-bold text-on-surface">Add Patient</h2>
+              <button onClick={() => setIsAddPatientModalOpen(false)} className="p-2 hover:bg-surface-variant rounded-full transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Patient NIK</label>
+                <input type="text" value={newPatientForm.nik} onChange={e => setNewPatientForm({...newPatientForm, nik: e.target.value})} className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" placeholder="16-digit NIK" />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Patient Name</label>
+                <input type="text" value={newPatientForm.name} onChange={e => setNewPatientForm({...newPatientForm, name: e.target.value})} className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" placeholder="Full Name" />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Address</label>
+                <textarea value={newPatientForm.address} onChange={e => setNewPatientForm({...newPatientForm, address: e.target.value})} className="w-full p-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" rows={3} placeholder="Full Address"></textarea>
+              </div>
+            </div>
+            <div className="p-6 border-t border-outline-variant flex justify-end gap-3 bg-surface-muted rounded-b-2xl mt-auto">
+               <button onClick={() => setIsAddPatientModalOpen(false)} className="px-4 py-2 border border-outline-variant text-on-surface rounded font-bold text-sm hover:bg-surface-variant transition-colors">Cancel</button>
+               <button onClick={handleAddPatient} disabled={!newPatientForm.name || !newPatientForm.nik} className="px-6 py-2 bg-primary disabled:opacity-50 text-on-primary rounded font-bold text-sm tracking-widest hover:bg-primary-fixed transition-colors">Save Patient</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Patient Modal */}
+      {isEditPatientModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-xl flex flex-col border border-outline-variant">
+            <div className="p-6 border-b border-outline-variant flex justify-between items-center bg-surface-muted rounded-t-2xl">
+              <h2 className="font-headline-md font-bold text-on-surface">Edit Patient</h2>
+              <button onClick={() => setIsEditPatientModalOpen(false)} className="p-2 hover:bg-surface-variant rounded-full transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Patient NIK</label>
+                <input type="text" value={editPatientForm.nik} onChange={e => setEditPatientForm({...editPatientForm, nik: e.target.value})} className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Patient Name</label>
+                <input type="text" value={editPatientForm.name} onChange={e => setEditPatientForm({...editPatientForm, name: e.target.value})} className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Address</label>
+                <textarea value={editPatientForm.address} onChange={e => setEditPatientForm({...editPatientForm, address: e.target.value})} className="w-full p-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" rows={3}></textarea>
+              </div>
+            </div>
+            <div className="p-6 border-t border-outline-variant flex justify-end gap-3 bg-surface-muted rounded-b-2xl mt-auto">
+               <button onClick={() => setIsEditPatientModalOpen(false)} className="px-4 py-2 border border-outline-variant text-on-surface rounded font-bold text-sm hover:bg-surface-variant transition-colors">Cancel</button>
+               <button onClick={handleEditPatient} disabled={!editPatientForm.name || !editPatientForm.nik} className="px-6 py-2 bg-primary disabled:opacity-50 text-on-primary rounded font-bold text-sm tracking-widest hover:bg-primary-fixed transition-colors">Update Patient</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Patient Modal */}
+      {isDeletePatientModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-sm rounded-2xl shadow-xl flex flex-col border border-outline-variant">
+            <div className="p-6 border-b border-outline-variant">
+              <h2 className="font-headline-md font-bold text-regulatory-alert flex items-center gap-2">
+                <span className="material-symbols-outlined">warning</span> Delete Patient
+              </h2>
+            </div>
+            <div className="p-6">
+              <p className="text-on-surface">Are you sure you want to delete this patient? This action cannot be undone.</p>
+            </div>
+            <div className="p-6 border-t border-outline-variant flex justify-end gap-3 bg-surface-muted rounded-b-2xl">
+               <button onClick={() => setIsDeletePatientModalOpen(false)} className="px-4 py-2 border border-outline-variant text-on-surface rounded font-bold text-sm hover:bg-surface-variant transition-colors">Cancel</button>
+               <button onClick={handleDeletePatient} className="px-6 py-2 bg-error-container text-regulatory-alert rounded font-bold text-sm tracking-widest hover:bg-error-container/80 transition-colors border border-regulatory-alert">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Account Modal */}
       {isAddAccountModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
@@ -846,6 +1326,26 @@ export default function Settings() {
                   onChange={e => setNewAccountForm({...newAccountForm, name: e.target.value})} 
                   className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
                   placeholder="e.g. Budi Darmawan" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Username</label>
+                <input 
+                  type="text" 
+                  value={newAccountForm.username} 
+                  onChange={e => setNewAccountForm({...newAccountForm, username: e.target.value})} 
+                  className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                  placeholder="e.g. budi_manager" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Password</label>
+                <input 
+                  type="password" 
+                  value={newAccountForm.password} 
+                  onChange={e => setNewAccountForm({...newAccountForm, password: e.target.value})} 
+                  className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                  placeholder="Leave empty for staff, or set password" 
                 />
               </div>
               <div>
@@ -888,6 +1388,26 @@ export default function Settings() {
                   onChange={e => setEditAccountForm({...editAccountForm, name: e.target.value})} 
                   className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
                   placeholder="e.g. Budi Darmawan" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Username</label>
+                <input 
+                  type="text" 
+                  value={editAccountForm.username} 
+                  onChange={e => setEditAccountForm({...editAccountForm, username: e.target.value})} 
+                  className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                  placeholder="e.g. budi_manager" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Password</label>
+                <input 
+                  type="password" 
+                  value={editAccountForm.password} 
+                  onChange={e => setEditAccountForm({...editAccountForm, password: e.target.value})} 
+                  className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors" 
+                  placeholder="Leave empty to keep unchanged" 
                 />
               </div>
               <div>

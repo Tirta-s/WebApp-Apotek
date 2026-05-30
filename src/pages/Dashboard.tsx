@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import Markdown from "react-markdown";
 import { SideNavBar, BottomNavBar, MobileHeader } from "../components/Navigation";
 import { GeminiChatbot } from "../components/GeminiChatbot";
+import { motion } from "motion/react";
 
 export default function Dashboard() {
   const userRole = localStorage.getItem("userRole") || "Staff";
@@ -14,6 +15,31 @@ export default function Dashboard() {
   const [startDate, setStartDate] = useState(new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [isParetoLoading, setIsParetoLoading] = useState(false);
+
+  // States for new widgets
+  const [omsetPeriod, setOmsetPeriod] = useState("1 Bulan");
+  const [itoPeriod, setItoPeriod] = useState("1 Tahun");
+
+  const [dashboardStats, setDashboardStats] = useState({
+    omsetData: { sales: 0, target: 0, percentage: 0, label: "" },
+    itoData: { ratio: 0, label: "" },
+    todaySales: 0
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await fetch(`/api/dashboard/stats?omsetPeriod=${omsetPeriod}&itoPeriod=${itoPeriod}`);
+        const data = await res.json();
+        if (res.ok) {
+          setDashboardStats(data);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchStats();
+  }, [omsetPeriod, itoPeriod]);
 
   useEffect(() => {
     const fetchPareto = async () => {
@@ -40,7 +66,7 @@ export default function Dashboard() {
       const res = await fetch("/api/gemini/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: "Berdasarkan data penjualan Rp 42.5M (+12.4% vs kemarin) dan 14 pending narcotic reports, berikan 2-3 poin insight singkat untuk manager apotek." })
+        body: JSON.stringify({ prompt: `Berdasarkan data penjualan Rp ${dashboardStats.todaySales.toLocaleString('id-ID')} (+12.4% vs kemarin) dan penjualan total Rp ${dashboardStats.omsetData.sales.toLocaleString('id-ID')} dengan ITO ${dashboardStats.itoData.ratio}x, berikan 2-3 poin insight singkat untuk manager apotek.` })
       });
       const data = await res.json();
       if (res.ok) {
@@ -101,42 +127,105 @@ export default function Dashboard() {
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter-admin mb-8">
-          <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl flex flex-col shadow-lg backdrop-blur-sm relative overflow-hidden group">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl flex flex-col shadow-lg backdrop-blur-sm relative overflow-hidden group">
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             <div className="flex justify-between items-start mb-4 relative z-10">
               <span className="font-headline-md text-headline-md text-on-surface">Total Sales (Today)</span>
               <span className="material-symbols-outlined text-primary shadow-glow">trending_up</span>
             </div>
-            <div className="font-pos-total text-[32px] font-bold text-on-surface mb-2 relative z-10">Rp 42.5M</div>
+            <div className="font-pos-total text-[24px] lg:text-[32px] font-bold text-on-surface mb-2 relative z-10 truncate">
+              Rp {dashboardStats.todaySales.toLocaleString('id-ID')}
+            </div>
             <div className="flex items-center gap-2 text-primary font-label-caps text-label-caps relative z-10 bg-primary/10 w-fit px-2 py-1 rounded-full">
               <span className="material-symbols-outlined text-[16px]">arrow_upward</span>
               <span>+12.4% vs Yesterday</span>
             </div>
-          </div>
+          </motion.div>
 
-          <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl flex flex-col shadow-lg backdrop-blur-sm relative overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-regulatory-alert/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div className="flex justify-between items-start mb-4 relative z-10">
-              <span className="font-headline-md text-headline-md text-on-surface">SIPNAP Action Req.</span>
-              <span className="material-symbols-outlined text-regulatory-alert drop-shadow-[0_0_8px_rgba(248,113,113,0.3)]">warning</span>
-            </div>
-            <div className="font-pos-total text-[32px] font-bold text-on-surface mb-2 relative z-10">14</div>
-            <div className="flex items-center gap-2 text-regulatory-alert font-label-caps text-label-caps relative z-10 bg-regulatory-alert/10 w-fit px-2 py-1 rounded-full">
-              <span>Pending Narcotic Reports</span>
-            </div>
-          </div>
-
-          <div className="bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl flex flex-col shadow-lg backdrop-blur-sm relative overflow-hidden group">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            className="bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl flex flex-col shadow-lg backdrop-blur-sm relative overflow-hidden group">
             <div className="absolute inset-0 bg-gradient-to-br from-info-blue/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div className="flex justify-between items-start mb-4 relative z-10">
-              <span className="font-headline-md text-headline-md text-on-surface">Active Pharmacists</span>
-              <span className="material-symbols-outlined text-info-blue drop-shadow-[0_0_8px_rgba(59,130,246,0.3)]">groups</span>
+            <div className="flex justify-between items-start mb-4 relative z-10 w-full">
+              <span className="font-headline-md text-headline-md text-on-surface">Omset vs Target</span>
+              <select 
+                value={omsetPeriod}
+                onChange={e => setOmsetPeriod(e.target.value)}
+                className="bg-surface-muted border border-outline-variant rounded px-2 py-1 text-xs focus:outline-none focus:border-primary text-on-surface-variant font-bold cursor-pointer hover:bg-surface-variant transition-colors"
+                title="Select Period"
+              >
+                <option value="Shift">Shift</option>
+                <option value="1 Hari">1 Hari</option>
+                <option value="1 Bulan">1 Bulan</option>
+                <option value="3 Bulan">3 Bulan</option>
+                <option value="1 Tahun">1 Tahun</option>
+              </select>
             </div>
-            <div className="font-pos-total text-[32px] font-bold text-on-surface mb-2 relative z-10">8/12</div>
-            <div className="flex items-center gap-2 text-on-surface-variant font-label-caps text-label-caps relative z-10 bg-surface-variant w-fit px-2 py-1 rounded-full">
-              <span>Across 4 Branches</span>
+            
+            <div className="font-pos-total text-[24px] lg:text-[28px] font-bold text-on-surface mb-1 relative z-10 truncate">
+              Rp {dashboardStats.omsetData.sales.toLocaleString('id-ID')}
             </div>
-          </div>
+            
+            <div className="flex flex-col gap-2 relative z-10 mt-auto">
+              <div className="flex items-center justify-between text-sm whitespace-nowrap">
+                <span className="text-on-surface-variant">Target: Rp {dashboardStats.omsetData.target.toLocaleString('id-ID')}</span>
+                <span className="text-primary font-bold">{dashboardStats.omsetData.percentage}%</span>
+              </div>
+              
+              <div className="w-full bg-surface-variant rounded-full h-2 overflow-hidden flex">
+                <div 
+                  className="bg-primary h-full rounded-full transition-all duration-1000 ease-out"
+                  style={{ width: `${Math.min(dashboardStats.omsetData.percentage, 100)}%` }}
+                ></div>
+                {dashboardStats.omsetData.percentage > 100 && (
+                   <div 
+                     className="bg-info-blue h-full rounded-r-full transition-all duration-1000 ease-out"
+                     style={{ width: `${Math.min(dashboardStats.omsetData.percentage - 100, 100)}%` }}
+                   ></div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
+            className="bg-surface-container-lowest border border-outline-variant p-6 rounded-2xl flex flex-col shadow-lg backdrop-blur-sm relative overflow-hidden group">
+            <div className="absolute inset-0 bg-gradient-to-br from-warning-amber/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div className="flex justify-between items-start mb-4 relative z-10 w-full">
+              <span className="font-headline-md text-headline-md text-on-surface">ITO (Turnover)</span>
+              <select 
+                value={itoPeriod}
+                onChange={e => setItoPeriod(e.target.value)}
+                className="bg-surface-muted border border-outline-variant rounded px-2 py-1 text-xs focus:outline-none focus:border-primary text-on-surface-variant font-bold cursor-pointer hover:bg-surface-variant transition-colors"
+                title="Select Period"
+              >
+                <option value="1 Bulan">1 Bulan</option>
+                <option value="6 Bulan">6 Bulan</option>
+                <option value="1 Tahun">1 Tahun</option>
+              </select>
+            </div>
+            
+            <div className="flex items-end gap-3 mb-2 relative z-10">
+              <div className="font-pos-total text-[32px] font-bold text-on-surface leading-none">{dashboardStats.itoData.ratio}x</div>
+            </div>
+            
+            <div className="text-on-surface-variant text-sm mb-3 mt-auto">
+              Perputaran persediaan inventory.
+            </div>
+            
+            <div className={`flex items-center gap-2 font-label-caps text-label-caps relative z-10 w-fit px-2 py-1 rounded-full ${dashboardStats.itoData.ratio > 5 ? 'bg-primary/10 text-primary' : 'bg-warning-amber/10 text-warning-amber'}`}>
+              <span className="material-symbols-outlined text-[16px]">{dashboardStats.itoData.ratio > 5 ? 'check_circle' : 'info'}</span>
+              <span>{dashboardStats.itoData.label}</span>
+            </div>
+          </motion.div>
         </div>
 
         {/* Gemini Intelligence Card */}
