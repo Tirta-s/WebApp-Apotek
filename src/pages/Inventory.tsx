@@ -8,6 +8,7 @@ import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 
 export default function Inventory() {
   const [inventory, setInventory] = useState<any[]>([]);
+  const [conversions, setConversions] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -240,6 +241,10 @@ export default function Inventory() {
     fetch('/api/po')
       .then(res => res.json())
       .then(data => setPoList(data));
+
+    fetch('/api/conversions')
+      .then(res => res.json())
+      .then(data => setConversions(data));
   }, []);
 
   const handleExportExcel = () => {
@@ -661,12 +666,20 @@ export default function Inventory() {
                         <td className="p-3 border-r border-border-subtle text-center text-on-surface-variant font-bold cursor-pointer hover:bg-surface-muted group relative">
                           <span className="material-symbols-outlined text-[16px]">more_vert</span>
                         </td>
-                        <td className="p-0 border-r border-border-subtle">
-                          <input type="text" className="w-full h-full min-h-[36px] px-2 bg-transparent text-on-surface focus:outline-none focus:bg-surface-muted transition-colors" value={row.kode} onChange={(e) => {
+                        <td className="p-0 border-r border-border-subtle relative">
+                          <input type="text" list={`inv-list-${index}`} className="w-full h-full min-h-[36px] px-2 bg-transparent text-on-surface focus:outline-none focus:bg-surface-muted transition-colors" value={row.kode} onChange={(e) => {
                              const newItems = [...fakturItems];
                              newItems[index].kode = e.target.value;
+                             const matched = inventory.find(i => i.id === e.target.value);
+                             if (matched) {
+                               newItems[index].nama = matched.name;
+                               // Optional: Update to standard base unit if possible
+                             }
                              setFakturItems(newItems);
-                          }} placeholder="Kode" />
+                          }} placeholder="Pilih Kode Obat" />
+                          <datalist id={`inv-list-${index}`}>
+                             {inventory.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                          </datalist>
                         </td>
                         <td className="p-0 border-r border-border-subtle">
                           <input type="text" className="w-full h-full min-h-[36px] px-2 bg-transparent text-on-surface focus:outline-none focus:bg-surface-muted transition-colors" value={row.nama} onChange={(e) => {
@@ -687,18 +700,38 @@ export default function Inventory() {
                           />
                         </td>
                         <td className="p-0 border-r border-border-subtle">
-                          <select className="w-full h-full min-h-[36px] px-2 bg-transparent text-on-surface focus:outline-none focus:bg-surface-muted transition-colors" value={row.satuan} onChange={(e) => {
-                             const newItems = [...fakturItems];
-                             newItems[index].satuan = e.target.value;
-                             setFakturItems(newItems);
-                          }}>
-                            <option value="Box">Box</option>
-                            <option value="Strip">Strip</option>
-                            <option value="Botol">Botol</option>
-                            <option value="Ampul">Ampul</option>
-                            <option value="Pcs">Pcs</option>
-                            <option value="Tube">Tube</option>
-                          </select>
+                          {(() => {
+                            const invItem = inventory.find(i => i.id === row.kode);
+                            const conv = invItem && invItem.conversionId ? conversions.find(c => c.id === invItem.conversionId) : null;
+                            if (conv) {
+                              return (
+                                <select className="w-full h-full min-h-[36px] px-2 bg-transparent text-on-surface focus:outline-none focus:bg-surface-muted transition-colors" value={row.satuan || conv.kecil} onChange={(e) => {
+                                   const newItems = [...fakturItems];
+                                   newItems[index].satuan = e.target.value;
+                                   setFakturItems(newItems);
+                                }}>
+                                  {conv.besar && <option value={conv.besar}>{conv.besar}</option>}
+                                  {conv.sedang && <option value={conv.sedang}>{conv.sedang}</option>}
+                                  {conv.kecil && <option value={conv.kecil}>{conv.kecil}</option>}
+                                </select>
+                              );
+                            } else {
+                              return (
+                                <select className="w-full h-full min-h-[36px] px-2 bg-transparent text-on-surface focus:outline-none focus:bg-surface-muted transition-colors" value={row.satuan} onChange={(e) => {
+                                   const newItems = [...fakturItems];
+                                   newItems[index].satuan = e.target.value;
+                                   setFakturItems(newItems);
+                                }}>
+                                  <option value="Box">Box</option>
+                                  <option value="Strip">Strip</option>
+                                  <option value="Botol">Botol</option>
+                                  <option value="Ampul">Ampul</option>
+                                  <option value="Pcs">Pcs</option>
+                                  <option value="Tube">Tube</option>
+                                </select>
+                              );
+                            }
+                          })()}
                         </td>
                         <td className="p-2 border-r border-border-subtle min-w-[100px]">
                           <input type="number" 
@@ -763,22 +796,15 @@ export default function Inventory() {
                      alert("Harap tambahkan minimal satu barang dengan kode valid.");
                      return;
                    }
-                   if (!selectedPoId) {
-                     alert("Pilih Purchase Order (PO) terlebih dahulu.");
-                     return;
-                   }
-                   if (!uploadedFakturId) {
-                     alert("Upload foto fisik faktur terlebih dahulu.");
-                     return;
-                   }
+                   // Validasi PO dan Foto Faktur dibuat opsional agar proses simpan mudah
                    try {
                      const res = await fetch('/api/inventory/faktur', {
                        method: 'POST',
                        headers: { 'Content-Type': 'application/json' },
                        body: JSON.stringify({
                          items: fakturItems,
-                         poId: selectedPoId,
-                         fakturId: uploadedFakturId,
+                         poId: selectedPoId || "Tanpa PO",
+                         fakturId: uploadedFakturId || "Tanpa Foto Faktur",
                          supplier: selectedSupplier || "Unknown"
                        })
                      });

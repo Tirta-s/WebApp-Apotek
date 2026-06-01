@@ -21,6 +21,13 @@ export default function Procurement() {
   const [selectedPoHistory, setSelectedPoHistory] = useState<any | null>(null);
   const [poHistoryLogs, setPoHistoryLogs] = useState<any[]>([]);
 
+  // Retur Faktur states
+  const [faktursData, setFaktursData] = useState<any[]>([]);
+  const [isReturFakturModalOpen, setIsReturFakturModalOpen] = useState(false);
+  const [selectedFakturToReturn, setSelectedFakturToReturn] = useState<string>("");
+  const [returFakturItems, setReturFakturItems] = useState<any[]>([]);
+  const [returFakturReason, setReturFakturReason] = useState("");
+
   const [poForm, setPoForm] = useState({
     pbf: "",
     ordererName: "",
@@ -155,6 +162,9 @@ export default function Procurement() {
         const pbfData = await pbfRes.json();
         setPbfList(pbfData);
 
+        const faktursRes = await fetch('/api/fakturs-data');
+        const faktursFetchData = await faktursRes.json();
+        setFaktursData(faktursFetchData);
         
         let suggestions: any[] = [];
         invData.forEach((item: any) => {
@@ -226,6 +236,10 @@ export default function Procurement() {
             <button onClick={() => setIsFakturOpen(true)} className="px-4 py-2 bg-secondary-container text-on-secondary-container rounded font-bold text-sm tracking-widest flex items-center gap-2 hover:bg-secondary-fixed transition-colors">
               <span className="material-symbols-outlined text-[18px]">receipt_long</span>
               Input Faktur
+            </button>
+            <button onClick={() => setIsReturFakturModalOpen(true)} className="px-4 py-2 bg-error text-on-error rounded font-bold text-sm tracking-widest flex items-center gap-2 hover:bg-error-container hover:text-on-error-container transition-colors">
+              <span className="material-symbols-outlined text-[18px]">assignment_return</span>
+              Retur Faktur
             </button>
             <div className="hidden lg:flex items-center bg-surface-container-low rounded-full px-4 h-10 border border-outline-variant focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-all">
               <span className="material-symbols-outlined text-on-surface-variant mr-2 text-sm">search</span>
@@ -1219,6 +1233,155 @@ export default function Procurement() {
                </button>
             </div>
             
+          </div>
+        </div>
+      )}
+
+      {/* Retur Faktur Modal */}
+      {isReturFakturModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[120] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-container-lowest w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-xl flex flex-col p-6 border border-outline-variant">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-headline-md font-bold text-on-surface flex items-center gap-2">
+                <span className="material-symbols-outlined text-error">assignment_return</span>
+                Retur Input Faktur
+              </h2>
+              <button onClick={() => setIsReturFakturModalOpen(false)} className="p-2 hover:bg-surface-variant rounded-full transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            
+            <p className="text-body-md text-on-surface-variant mb-6">
+              Panggil faktur yang telah disimpan lalu tentukan jumlah per item yang ingin di retur (dikembalikan). Ini akan mengurangi stok secara langsung.
+            </p>
+            
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-2">Pilih Faktur Tersimpan</label>
+                <select 
+                  className="w-full h-10 px-3 bg-surface-muted border border-border-subtle rounded focus:outline-none focus:border-primary"
+                  value={selectedFakturToReturn}
+                  onChange={(e) => {
+                    const fid = e.target.value;
+                    setSelectedFakturToReturn(fid);
+                    const selFak = faktursData.find(f => f.id === fid);
+                    if (selFak) {
+                      setReturFakturItems(selFak.items.map((it: any) => ({ ...it, qtyToReturn: 0 })));
+                    } else {
+                      setReturFakturItems([]);
+                    }
+                  }}
+                >
+                  <option value="">-- Pilih Faktur --</option>
+                  {faktursData.map(fak => (
+                    <option key={fak.id} value={fak.id}>
+                      {fak.id} - {fak.supplier} ({new Date(fak.createdAt).toLocaleDateString()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-on-surface mb-2">Alasan Retur (Terpusat)</label>
+                <input 
+                  type="text"
+                  value={returFakturReason}
+                  onChange={e => setReturFakturReason(e.target.value)}
+                  className="w-full h-10 px-3 bg-surface-muted border border-border-subtle rounded focus:outline-none focus:border-primary"
+                  placeholder="Opsional, misalnya Expired..."
+                />
+              </div>
+            </div>
+
+            {returFakturItems.length > 0 && (
+              <div className="mb-6 border border-outline-variant rounded-lg overflow-hidden bg-surface-muted">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-surface-container-low text-on-surface border-b border-outline-variant">
+                    <tr>
+                      <th className="p-3 font-bold border-r border-outline-variant">Obat / Barang</th>
+                      <th className="p-3 font-bold border-r border-outline-variant text-center">Dikirim</th>
+                      <th className="p-3 font-bold border-r border-outline-variant text-center">Sudah Retur</th>
+                      <th className="p-3 font-bold bg-error-container text-on-error-container text-center">Retur Sekarang</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant bg-surface">
+                    {returFakturItems.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-surface-muted transition-colors">
+                        <td className="p-3 border-r border-outline-variant font-medium">
+                          {item.nama}
+                          <div className="text-xs text-on-surface-variant">{item.kode}</div>
+                        </td>
+                        <td className="p-3 border-r border-outline-variant text-center font-mono">
+                          {item.jumlah} {item.satuan}
+                        </td>
+                        <td className="p-3 border-r border-outline-variant text-center font-mono text-error">
+                          {item.returnedQty || 0}
+                        </td>
+                        <td className="p-3 text-center">
+                          <input 
+                            type="number"
+                            min="0"
+                            max={(item.jumlah || 0) - (item.returnedQty || 0)}
+                            className="w-24 text-center h-8 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-error"
+                            value={item.qtyToReturn || ''}
+                            onChange={(e) => {
+                              const v = parseInt(e.target.value) || 0;
+                              const sisa = (item.jumlah || 0) - (item.returnedQty || 0);
+                              const newVals = [...returFakturItems];
+                              newVals[idx].qtyToReturn = Math.min(Math.max(0, v), sisa);
+                              setReturFakturItems(newVals);
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 mt-auto border-t border-outline-variant pt-4">
+              <button 
+                onClick={() => setIsReturFakturModalOpen(false)}
+                className="px-6 py-2 border border-outline-variant text-on-surface rounded font-bold hover:bg-surface-variant transition-colors"
+              >
+                Batal
+              </button>
+              <button 
+                disabled={returFakturItems.length === 0 || returFakturItems.every(i => !i.qtyToReturn)}
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`/api/faktur/${selectedFakturToReturn}/retur`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ itemsToReturn: returFakturItems, reason: returFakturReason })
+                    });
+                    if (res.ok) {
+                      alert("Retur faktur telah berhasil disimpan dan stok terpotong!");
+                      setIsReturFakturModalOpen(false);
+                      setReturFakturItems([]);
+                      setSelectedFakturToReturn("");
+                      setReturFakturReason("");
+                      
+                      const fRes = await fetch('/api/fakturs-data');
+                      const fData = await fRes.json();
+                      setFaktursData(fData);
+                      
+                      const invRes = await fetch('/api/inventory');
+                      const invData = await invRes.json();
+                      setInventory(invData);
+                    } else {
+                      alert("Gagal melakukan retur");
+                    }
+                  } catch (e) {
+                     console.error("Gagal retur faktur", e);
+                     alert("Terdapat error saat memproses retur");
+                  }
+                }}
+                className="px-8 py-2 bg-error text-on-error rounded font-bold tracking-widest hover:bg-red-600 disabled:opacity-50 disabled:hover:bg-error transition-colors flex items-center gap-2 shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[18px]">app_registration</span> Proses Retur
+              </button>
+            </div>
           </div>
         </div>
       )}

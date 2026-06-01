@@ -92,6 +92,8 @@ export default function POS() {
   const userRole = localStorage.getItem("userRole") || "Staff";
   const isManager = userRole === "Manager";
 
+  const [conversions, setConversions] = useState<any[]>([]);
+
   useEffect(() => {
     fetch('/api/inventory')
       .then(res => res.json())
@@ -107,6 +109,10 @@ export default function POS() {
     fetch('/api/patients')
       .then(res => res.json())
       .then(data => setPatientsDB(data));
+
+    fetch('/api/conversions')
+      .then(res => res.json())
+      .then(data => setConversions(data));
   }, []);
 
   useEffect(() => {
@@ -426,36 +432,68 @@ export default function POS() {
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right align-top">
-                      <div className="flex items-center justify-end gap-2 mt-1">
-                        <button onClick={() => updateQty(index, -1)} className="w-8 h-8 rounded-full border border-border-subtle flex items-center justify-center text-on-surface-variant hover:bg-surface-variant">-</button>
-                        <input 
-                          type="number" 
-                          min="1" 
-                          value={item.qty} 
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const newCart = [...cart];
-                            newCart[index].qty = val === "" ? "" : (parseInt(val) || 0);
-                            setCart(newCart);
-                          }}
-                          onBlur={() => {
-                            const newCart = [...cart];
-                            if (newCart[index].qty === "" || newCart[index].qty <= 0) {
-                              newCart[index].qty = 1;
-                            }
-                            setCart(newCart);
-                          }}
-                          className={`w-12 text-center font-data-mono text-data-mono bg-transparent border-b focus:outline-none ${(() => {
-                            if (!item.isCompounded) {
-                              const invItem = inventory.find(i => i.id === item.id);
-                              if (invItem && (Number(item.qty) || 0) > invItem.stock) {
-                                return 'text-regulatory-alert border-regulatory-alert font-bold';
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-2 mt-1">
+                          <button onClick={() => updateQty(index, -1)} className="w-8 h-8 rounded-full border border-border-subtle flex items-center justify-center text-on-surface-variant hover:bg-surface-variant">-</button>
+                          <input 
+                            type="number" 
+                            min="1" 
+                            value={item.qty} 
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const newCart = [...cart];
+                              newCart[index].qty = val === "" ? "" : (parseInt(val) || 0);
+                              setCart(newCart);
+                            }}
+                            onBlur={() => {
+                              const newCart = [...cart];
+                              if (newCart[index].qty === "" || newCart[index].qty <= 0) {
+                                newCart[index].qty = 1;
                               }
-                            }
-                            return 'border-border-subtle';
-                          })()}`} 
-                        />
-                        <button onClick={() => updateQty(index, 1)} className="w-8 h-8 rounded-full border border-border-subtle flex items-center justify-center text-on-surface-variant hover:bg-surface-variant">+</button>
+                              setCart(newCart);
+                            }}
+                            className={`w-12 text-center font-data-mono text-data-mono bg-transparent border-b focus:outline-none ${(() => {
+                              if (!item.isCompounded) {
+                                const invItem = inventory.find(i => i.id === item.id);
+                                if (invItem && (Number(item.qty) || 0) > invItem.stock) {
+                                  return 'text-regulatory-alert border-regulatory-alert font-bold';
+                                }
+                              }
+                              return 'border-border-subtle';
+                            })()}`} 
+                          />
+                          <button onClick={() => updateQty(index, 1)} className="w-8 h-8 rounded-full border border-border-subtle flex items-center justify-center text-on-surface-variant hover:bg-surface-variant">+</button>
+                        </div>
+                        {(!item.isCompounded && inventory.find(i => i.id === item.id)?.conversionId) && (
+                          (() => {
+                            const invItem = inventory.find(i => i.id === item.id);
+                            const conv = conversions.find(c => c.id === invItem?.conversionId);
+                            if (!conv) return null;
+                            return (
+                              <select 
+                                value={item.satuan || conv.kecil} 
+                                onChange={(e) => {
+                                  const newCart = [...cart];
+                                  const sel = e.target.value;
+                                  newCart[index].satuan = sel;
+                                  let multi = 1;
+                                  if (sel === conv.besar) {
+                                    multi = (Number(conv.sedang_qty) || 1) * (Number(conv.kecil_qty) || 1);
+                                  } else if (sel === conv.sedang) {
+                                    multi = (Number(conv.kecil_qty) || 1);
+                                  }
+                                  newCart[index].price = (invItem.price || 0) * multi;
+                                  setCart(newCart);
+                                }}
+                                className="text-xs bg-surface-muted border border-border-subtle rounded px-1 max-w-[80px]"
+                              >
+                                {conv.besar && <option value={conv.besar}>{conv.besar}</option>}
+                                {conv.sedang && <option value={conv.sedang}>{conv.sedang}</option>}
+                                {conv.kecil && <option value={conv.kecil}>{conv.kecil}</option>}
+                              </select>
+                            );
+                          })()
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right font-data-mono text-data-mono text-on-surface-variant align-top pt-5">Rp {item.price.toLocaleString()}</td>

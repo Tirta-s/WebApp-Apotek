@@ -46,9 +46,9 @@ export default function Settings() {
   const [editPbfForm, setEditPbfForm] = useState({ id: "", name: "", sales: "", phone: "", license: "", address: "" });
 
   const [isAddDrugModalOpen, setIsAddDrugModalOpen] = useState(false);
-  const [newDrugForm, setNewDrugForm] = useState({ name: "", type: "Tablet" });
+  const [newDrugForm, setNewDrugForm] = useState({ name: "", type: "Tablet", conversionId: "" });
   const [isEditDrugModalOpen, setIsEditDrugModalOpen] = useState(false);
-  const [editDrugForm, setEditDrugForm] = useState({ id: "", name: "", type: "Tablet" });
+  const [editDrugForm, setEditDrugForm] = useState({ id: "", name: "", type: "Tablet", conversionId: "" });
   const [isDeleteDrugModalOpen, setIsDeleteDrugModalOpen] = useState(false);
   const [deleteDrugId, setDeleteDrugId] = useState<string | null>(null);
   const [inventoryList, setInventoryList] = useState<any[]>([]);
@@ -302,7 +302,7 @@ export default function Settings() {
       if (res.ok) {
         const added = await res.json();
         setInventoryList([...inventoryList, added]);
-        setNewDrugForm({ name: "", type: "Tablet" });
+        setNewDrugForm({ name: "", type: "Tablet", conversionId: "" });
         setIsAddDrugModalOpen(false);
       }
     } catch (e) {
@@ -316,7 +316,7 @@ export default function Settings() {
       const res = await fetch(`/api/inventory/${editDrugForm.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editDrugForm.name, type: editDrugForm.type })
+        body: JSON.stringify({ name: editDrugForm.name, type: editDrugForm.type, conversionId: editDrugForm.conversionId })
       });
       if (res.ok) {
         const updated = await res.json();
@@ -953,6 +953,19 @@ export default function Settings() {
                   <option value="Alkes">Alat Kesehatan</option>
                 </select>
               </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Standar Konversi (Opsional)</label>
+                <select 
+                  value={newDrugForm.conversionId} 
+                  onChange={e => setNewDrugForm({...newDrugForm, conversionId: e.target.value})} 
+                  className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors"
+                >
+                  <option value="">Tidak ada konversi</option>
+                  {conversionList.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.rule})</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="p-6 border-t border-outline-variant flex justify-end gap-3 bg-surface-muted rounded-b-2xl mt-auto">
                <button onClick={() => setIsAddDrugModalOpen(false)} className="px-4 py-2 border border-outline-variant text-on-surface rounded font-bold text-sm hover:bg-surface-variant transition-colors">Batal</button>
@@ -998,6 +1011,19 @@ export default function Settings() {
                   <option value="Tetes">Tetes (Drop)</option>
                   <option value="Injeksi">Injeksi / Vial</option>
                   <option value="Alkes">Alat Kesehatan</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-bold text-on-surface mb-2">Standar Konversi (Opsional)</label>
+                <select 
+                  value={editDrugForm.conversionId} 
+                  onChange={e => setEditDrugForm({...editDrugForm, conversionId: e.target.value})} 
+                  className="w-full h-10 px-3 bg-surface-muted border border-outline-variant rounded focus:outline-none focus:border-primary focus:bg-surface transition-colors"
+                >
+                  <option value="">Tidak ada konversi</option>
+                  {conversionList.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.rule})</option>
+                  ))}
                 </select>
               </div>
             </div>

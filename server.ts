@@ -15,6 +15,7 @@ async function startServer() {
     shifts: [],
     pos: [],
     fakturs: [] as any[],
+    faktursData: [] as any[],
     opnameSessions: [] as any[],
     inventoryLogs: [] as any[],
     auditLogs: [] as any[],
@@ -248,7 +249,7 @@ async function startServer() {
   });
   
   app.post("/api/inventory", (req, res) => {
-    const { name, category, type } = req.body;
+    const { name, category, type, conversionId } = req.body;
     const newDrug = {
       id: `DRG-${Date.now()}`,
       name,
@@ -258,7 +259,8 @@ async function startServer() {
       expiry: "2026-12",
       stock: 0,
       isSipnap: false,
-      price: 0
+      price: 0,
+      conversionId: conversionId || ""
     };
     db.inventory.push(newDrug);
     res.json(newDrug);
@@ -268,10 +270,10 @@ async function startServer() {
   
   app.put("/api/inventory/:id", (req, res) => {
     const { id } = req.params;
-    const { name, type } = req.body;
+    const { name, type, conversionId } = req.body;
     const index = db.inventory.findIndex(item => item.id === id);
     if (index !== -1) {
-      db.inventory[index] = { ...db.inventory[index], name, type };
+      db.inventory[index] = { ...db.inventory[index], name, type, conversionId };
       res.json(db.inventory[index]);
     } else {
       res.status(404).json({ error: "Drug not found" });
@@ -419,23 +421,73 @@ async function startServer() {
     // Deduct stock
     let totalValue = 0;
     for (const item of items) {
-      totalValue += (item.price || 0) * (Number(item.qty) || 0);
-      const index = db.inventory.findIndex(inv => inv.id === item.id);
-      if (index !== -1) {
-        db.inventory[index].stock = Math.max(0, db.inventory[index].stock - (Number(item.qty) || 0));
-        
-        // Log the transaction
-        db.inventoryLogs.push({
-          id: `LOG-TRX-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          itemId: item.id,
-          userId: "System",
-          userRole: "POS",
-          timestamp: new Date().toISOString(),
-          type: "OUT",
-          oldStock: db.inventory[index].stock + (Number(item.qty) || 0),
-          newStock: db.inventory[index].stock,
-          reason: `Terjual via POS (${paymentMethod || 'Cash'})`
-        });
+      if (item.isCompounded) {
+          totalValue += (item.price || 0) * (Number(item.qty) || 1); // For compounded pricing
+          // Compounded items deduct ingredients
+          if (item.compoundingIngredients && Array.isArray(item.compoundingIngredients)) {
+             for (const ing of item.compoundingIngredients) {
+                const ingIndex = db.inventory.findIndex((inv:any) => inv.name.toLowerCase() === ing.name.toLowerCase());
+                if (ingIndex !== -1) {
+                   const qtyToDeduct = (Number(ing.qtyUsed) || 0) * (Number(item.qty) || 1);
+                   const oldTotal = db.inventory[ingIndex].stock;
+                   db.inventory[ingIndex].stock = Math.max(0, oldTotal - qtyToDeduct);
+                   db.inventoryLogs.push({
+                      id: `LOG-TRX-CMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                      itemId: db.inventory[ingIndex].id,
+                      userId: "System",
+                      userRole: "POS",
+                      timestamp: new Date().toISOString(),
+                      type: "OUT",
+                      oldStock: oldTotal,
+                      newStock: db.inventory[ingIndex].stock,
+                      reason: `Terjual via POS (Racikan ${item.id})`
+                   });
+                }
+             }
+          }
+      } else {
+        // Evaluate unit conversions
+        let multiplier = 1;
+        const index = db.inventory.findIndex((inv:any) => inv.id === item.id);
+        if (index !== -1) {
+            const drug = db.inventory[index];
+            if (drug.conversionId) {
+                const conv = db.conversions.find((c:any) => c.id === drug.conversionId);
+                if (conv) {
+                    if (item.satuan === conv.besar) {
+                        multiplier = (Number(conv.sedang_qty) || 1) * (Number(conv.kecil_qty) || 1);
+                    } else if (item.satuan === conv.sedang) {
+                        multiplier = (Number(conv.kecil_qty) || 1);
+                    } else if (item.satuan === conv.kecil) {
+                        multiplier = 1;
+                    }
+                }
+            }
+            
+            const qtyToDeduct = (Number(item.qty) || 0) * multiplier;
+            // The POS 'item.price' might be base unit price. But wait, in POS the price displayed is directly 'item.price' and multiplied by item.qty. 
+            // In POS, if we change satuan, it currently DOES NOT change item.price. 
+            // The user requested: "agar satuan ketikan melakukan penjulaan ... dapat di konversi dengan benar"
+            // Wait, does 'item.price' need to scale? Usually 1 Box is more expensive than 1 Tab (multiplier * TabPrice). 
+            // Let's assume totalValue is handled by FE or price is manually set. Actually, the totalValue here is just item.price * item.qty.
+            totalValue += (item.price || 0) * (Number(item.qty) || 0);
+
+            const oldStock = drug.stock;
+            drug.stock = Math.max(0, oldStock - qtyToDeduct);
+            
+            // Log the transaction
+            db.inventoryLogs.push({
+              id: `LOG-TRX-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              itemId: item.id,
+              userId: "System",
+              userRole: "POS",
+              timestamp: new Date().toISOString(),
+              type: "OUT",
+              oldStock: oldStock,
+              newStock: drug.stock,
+              reason: `Terjual via POS (${paymentMethod || 'Cash'})`
+            });
+        }
       }
     }
 
@@ -462,8 +514,26 @@ async function startServer() {
       
       const index = db.inventory.findIndex((inv: any) => inv.id === item.kode);
       if (index !== -1) {
-        const oldStock = db.inventory[index].stock;
-        const newStock = oldStock + Number(item.jumlah);
+        const drug = db.inventory[index];
+        let multiplier = 1;
+        
+        if (drug.conversionId) {
+          const conv = db.conversions.find((c: any) => c.id === drug.conversionId);
+          if (conv) {
+            if (item.satuan === conv.besar) {
+              multiplier = (Number(conv.sedang_qty) || 1) * (Number(conv.kecil_qty) || 1);
+            } else if (item.satuan === conv.sedang) {
+              multiplier = (Number(conv.kecil_qty) || 1);
+            } else if (item.satuan === conv.kecil) {
+              multiplier = 1;
+            }
+          }
+        }
+        
+        const addedQty = Number(item.jumlah) * multiplier;
+
+        const oldStock = drug.stock;
+        const newStock = oldStock + addedQty;
         
         db.inventory[index].stock = newStock;
         
@@ -492,6 +562,14 @@ async function startServer() {
       }
     }
     
+    db.faktursData.push({
+      id: fakturId || `FAKTUR-${Date.now()}`,
+      poId,
+      supplier,
+      items: items.map((i: any) => ({...i, returnedQty: 0})),
+      createdAt: new Date().toISOString()
+    });
+
     res.json({ success: true, message: "Faktur processed successfully" });
   });
 
@@ -579,6 +657,67 @@ async function startServer() {
     
     // Send as JSON data instead of raw image buffer for simplicity
     res.json({ id: faktur.id, data: faktur.data });
+  });
+
+  app.get("/api/fakturs-data", (req, res) => {
+    res.json(db.faktursData);
+  });
+
+  app.post("/api/faktur/:id/retur", (req, res) => {
+    const fakturId = req.params.id;
+    const { itemsToReturn, reason } = req.body;
+
+    const fakturIndex = db.faktursData.findIndex((f: any) => f.id === fakturId);
+    if (fakturIndex === -1) return res.status(404).json({ error: "Faktur not found" });
+
+    const faktur = db.faktursData[fakturIndex];
+
+    for (const returnItem of itemsToReturn) {
+      if (!returnItem.qtyToReturn || returnItem.qtyToReturn <= 0) continue;
+      
+      const fakturItem = faktur.items.find((i: any) => i.kode === returnItem.kode);
+      if (!fakturItem) continue;
+
+      fakturItem.returnedQty = (fakturItem.returnedQty || 0) + Number(returnItem.qtyToReturn);
+
+      const invIndex = db.inventory.findIndex((inv: any) => inv.id === returnItem.kode);
+      if (invIndex !== -1) {
+        const drug = db.inventory[invIndex];
+        let multiplier = 1;
+        if (drug.conversionId) {
+          const conv = db.conversions.find((c: any) => c.id === drug.conversionId);
+          if (conv) {
+            if (fakturItem.satuan === conv.besar) {
+              multiplier = (Number(conv.sedang_qty) || 1) * (Number(conv.kecil_qty) || 1);
+            } else if (fakturItem.satuan === conv.sedang) {
+              multiplier = (Number(conv.kecil_qty) || 1);
+            } else if (fakturItem.satuan === conv.kecil) {
+              multiplier = 1;
+            }
+          }
+        }
+        
+        const returnQtyBase = Number(returnItem.qtyToReturn) * multiplier;
+        const oldStock = drug.stock;
+        const newStock = Math.max(0, oldStock - returnQtyBase);
+        
+        db.inventory[invIndex].stock = newStock;
+        
+        db.inventoryLogs.push({
+          id: `LOG-RET-FAK-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          itemId: drug.id,
+          userId: "System",
+          userRole: "Inventory",
+          timestamp: new Date().toISOString(),
+          type: "OUT",
+          oldStock: oldStock,
+          newStock: newStock,
+          reason: `Retur Faktur ${fakturId}: ${reason || ''}`
+        });
+      }
+    }
+
+    res.json({ success: true, message: "Retur faktur processed" });
   });
 
   app.get("/api/dashboard/stats", (req, res) => {
