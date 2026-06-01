@@ -1,8 +1,92 @@
 import { Link, useLocation } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+
+function NotificationCenter() {
+  const [lowStockItems, setLowStockItems] = useState<any[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fetchInventory = async () => {
+      try {
+        const res = await fetch('/api/inventory');
+        if (res.ok) {
+          const data = await res.json();
+          // Filter items below min stock
+          const low = data.filter((item: any) => item.minStock && item.stock < item.minStock);
+          setLowStockItems(low);
+        }
+      } catch (err) {
+        console.error("Failed to fetch inventory for notifications", err);
+      }
+    };
+    
+    fetchInventory();
+    const interval = setInterval(fetchInventory, 30000); // Check every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={notificationRef}>
+      <button 
+        onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+        className="w-8 h-8 rounded-full border border-border-subtle flex items-center justify-center text-on-surface-variant hover:bg-surface-variant relative transition-colors"
+      >
+        <span className="material-symbols-outlined text-[20px]">notifications</span>
+        {lowStockItems.length > 0 && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 bg-error text-on-error rounded-full text-[10px] font-bold flex items-center justify-center border-2 border-surface-container-lowest">
+            {lowStockItems.length > 9 ? '9+' : lowStockItems.length}
+          </span>
+        )}
+      </button>
+      {isNotificationsOpen && (
+        <div className="absolute top-10 right-0 md:left-full md:right-auto md:ml-2 w-72 bg-surface-container border border-outline-variant rounded-xl shadow-lg z-[160] overflow-hidden">
+          <div className="p-3 border-b border-outline-variant bg-surface-muted flex items-center justify-between">
+            <h3 className="font-bold text-sm text-on-surface">Notifications</h3>
+            {lowStockItems.length > 0 && <span className="text-xs bg-error-container text-on-error-container px-2 py-0.5 rounded font-medium">{lowStockItems.length} Alerts</span>}
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {lowStockItems.length === 0 ? (
+              <div className="p-4 text-center text-sm text-on-surface-variant">No alerts at the moment.</div>
+            ) : (
+              <ul className="divide-y divide-outline-variant">
+                {lowStockItems.map((item) => (
+                  <li key={item.id} className="p-3 hover:bg-surface-muted transition-colors">
+                    <div className="text-sm font-bold text-on-surface mb-1 flex items-start gap-1">
+                      <span className="material-symbols-outlined text-error text-[16px]">warning</span>
+                      <span>Low Stock Alert</span>
+                    </div>
+                    <div className="text-sm text-on-surface-variant">
+                      <span className="font-medium text-on-surface">{item.name}</span> is below minimum level.
+                    </div>
+                    <div className="flex gap-4 mt-2 text-xs">
+                      <div className="text-on-surface-variant">Current: <span className="text-error font-bold">{item.stock}</span></div>
+                      <div className="text-on-surface-variant">Min: <span className="font-bold">{item.minStock}</span></div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function MobileHeader({ title, onBack }: { title: string, onBack?: () => void }) {
   return (
-    <header className="bg-surface/90 backdrop-blur-md border-b border-outline-variant w-full z-[150] md:hidden fixed top-0 flex items-center px-4 h-16 pt-[env(safe-area-inset-top)] shadow-sm">
+    <header className="bg-surface/90 backdrop-blur-md border-b border-outline-variant w-full z-[150] md:hidden fixed top-0 flex items-center justify-between px-4 h-16 pt-[env(safe-area-inset-top)] shadow-sm">
       <div className="flex items-center gap-2">
         {onBack ? (
           <button onClick={onBack} className="w-8 h-8 flex items-center justify-center hover:bg-surface-variant rounded-full transition-colors mr-1">
@@ -13,6 +97,7 @@ export function MobileHeader({ title, onBack }: { title: string, onBack?: () => 
         )}
         <h1 className="font-headline-md font-bold text-on-surface truncate">{title}</h1>
       </div>
+      <NotificationCenter />
     </header>
   );
 }
@@ -39,9 +124,12 @@ export function SideNavBar() {
   return (
     <nav className="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-surface-container-lowest/90 backdrop-blur-md border-r border-outline-variant py-gutter-admin px-4 z-50 shadow-glass">
       <div className="mb-8 px-2 flex flex-col items-start">
-        <div className="flex items-center gap-2 mb-1 mt-4">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center font-bold text-on-primary text-xl shadow-sm">M</div>
-          <span className="font-headline-md text-[18px] font-bold text-inverse-on-surface tracking-tight">Medisync <span className="text-primary">ERP</span></span>
+        <div className="flex items-center justify-between w-full mb-1 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center font-bold text-on-primary text-xl shadow-sm">M</div>
+            <span className="font-headline-md text-[18px] font-bold text-inverse-on-surface tracking-tight">Medisync <span className="text-primary">ERP</span></span>
+          </div>
+          <NotificationCenter />
         </div>
         <div className="flex items-center gap-3 mt-6 w-full p-3 bg-surface-container-low rounded-xl border border-outline-variant shadow-sm relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1 h-full bg-primary"></div>
